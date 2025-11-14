@@ -12,9 +12,38 @@ app.use(express.json({ limit: "10mb" }));
 
 const NETLIFY_TOKEN = process.env.NETLIFY_TOKEN;
 
-// =========================
-// DEPLOY PORTFOLIO ROUTE
-// =========================
+// =======================================================
+// Clean Netlify site naming: username-portfolio, fallback
+// =======================================================
+async function createNetlifySite(username) {
+  let baseName = `${username}-portfolio`;
+  let finalName = baseName;
+  let attempt = 0;
+
+  while (true) {
+    const siteRes = await fetch("https://api.netlify.com/api/v1/sites", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${NETLIFY_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: finalName })
+    });
+
+    const site = await siteRes.json();
+
+    // SUCCESS → return the site object
+    if (site.id) return site;
+
+    // Name already taken → try next
+    attempt++;
+    finalName = `${baseName}-${attempt}`;
+  }
+}
+
+// =======================================================
+// DEPLOY ROUTE (Main API endpoint)
+// =======================================================
 app.post("/deploy", async (req, res) => {
   try {
     const { username, html } = req.body;
@@ -23,37 +52,23 @@ app.post("/deploy", async (req, res) => {
       return res.status(400).json({ error: "Missing username or html" });
     }
 
-    // ---------------------------
-    // 1. Create a new Netlify site
-    // ---------------------------
-    const siteRes = await fetch("https://api.netlify.com/api/v1/sites", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${NETLIFY_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: `portfolio-${username}-${Date.now()}`
-      }),
-    });
-
-    const site = await siteRes.json();
-    if (!site.id) {
-      return res.status(500).json({ error: "Failed to create Netlify site", details: site });
-    }
-
+    // ---------------------------------------------------
+    // 1. Create Netlify Site (clean naming)
+    // ---------------------------------------------------
+    const site = await createNetlifySite(username);
     const siteId = site.id;
 
-    // ---------------------------
-    // 2. Create ZIP containing index.html
-    // ---------------------------
+    // ---------------------------------------------------
+    // 2. Create ZIP file containing "index.html"
+    // ---------------------------------------------------
     const zip = new JSZip();
     zip.file("index.html", html);
+
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
 
-    // ---------------------------
+    // ---------------------------------------------------
     // 3. Deploy ZIP to Netlify
-    // ---------------------------
+    // ---------------------------------------------------
     const deployRes = await fetch(
       `https://api.netlify.com/api/v1/sites/${siteId}/deploys`,
       {
@@ -68,9 +83,9 @@ app.post("/deploy", async (req, res) => {
 
     const deploy = await deployRes.json();
 
-    // ---------------------------
-    // 4. Return working live URL
-    // ---------------------------
+    // ---------------------------------------------------
+    // 4. Send final working URL to frontend
+    // ---------------------------------------------------
     return res.json({
       success: true,
       url: site.ssl_url,
@@ -84,7 +99,7 @@ app.post("/deploy", async (req, res) => {
   }
 });
 
-// =========================
+// =======================================================
 // START SERVER
-// =========================
-app.listen(3000, () => console.log("Backend running on port 3000"));
+// =======================================================
+app.listen(3000, () => console.log("🚀 Backend running on port 3000"));
